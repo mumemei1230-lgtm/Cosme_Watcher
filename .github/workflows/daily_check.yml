@@ -2,7 +2,7 @@ name: Daily Cosme Check
 
 on:
   schedule:
-    - cron: '0 * * * *'
+    - cron: '0 * * * *' # 1時間に1回実行
   workflow_dispatch: # 手動実行ボタンを出す設定
 
 jobs:
@@ -10,13 +10,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
+
       - name: Install dependencies
         run: pip install requests beautifulsoup4
+
       - name: Run script
         env:
-          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }} # 金庫からURLを取り出す
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          RAKUTEN_APP_ID: ${{ secrets.RAKUTEN_APP_ID }}
+          RAKUTEN_AFFILIATE_ID: ${{ secrets.RAKUTEN_AFFILIATE_ID }}
         run: python news_get.py
+
+      - name: Save memory
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          touch sent_products.txt
+          git add sent_products.txt
+          git commit -m "update memory [skip ci]" || echo "No changes to commit"
+          git push
