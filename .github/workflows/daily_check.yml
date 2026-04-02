@@ -1,0 +1,22 @@
+name: Daily Cosme Check
+
+on:
+  schedule:
+    - cron: '0 10 * * *' # 日本時間19時（毎日）
+  workflow_dispatch: # 手動実行ボタンを出す設定
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4
+      - name: Run script
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }} # 金庫からURLを取り出す
+        run: python news_get.py
