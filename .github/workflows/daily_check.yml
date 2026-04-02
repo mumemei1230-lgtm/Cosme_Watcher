@@ -2,7 +2,7 @@ name: Daily Cosme Check
 
 on:
   schedule:
-    - cron: '0 12 * * *' # 日本時間19時（毎日）
+    - cron: '0 13 * * *' # 日本時間19時（毎日）
   workflow_dispatch: # 手動実行ボタンを出す設定
 
 jobs:
