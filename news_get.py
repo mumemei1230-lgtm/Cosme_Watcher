@@ -1,60 +1,87 @@
 import requests
+import os
 from bs4 import BeautifulSoup
-from datetime import datetime
-import csv
-import os  # ★OSの機能を使うために追加
 
-# --- 設定（GitHubの「秘密の金庫」から読み込むように変更） ---
-WEBHOOK_URL = os.getenv("WEBHOOK_URL") 
-TARGET_URL = "https://lipscosme.com/new_items"
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+# --- 設定（GitHubのSecretsから自動で読み込まれます） ---
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+RAKUTEN_APP_ID = os.getenv("RAKUTEN_APP_ID")
+RAKUTEN_AFF_ID = os.getenv("RAKUTEN_AFFILIATE_ID")
 
 def send_discord(message):
-    # 万が一URLが空（設定忘れ）だった場合にエラーで止まらないようにする
     if not WEBHOOK_URL:
         print("エラー: WEBHOOK_URLが設定されていません")
         return
-    requests.post(WEBHOOK_URL, json={"content": message})
+    payload = {"content": message}
+    requests.post(WEBHOOK_URL, json=payload)
 
-# --- 実行 ---
-response = requests.get(TARGET_URL, headers=HEADERS)
-response.encoding = response.apparent_encoding
-soup = BeautifulSoup(response.text, "html.parser")
+def get_rakuten_info(keyword):
+    """楽天APIで最安値とアフィリエイトURLを取得する"""
+    if not RAKUTEN_APP_ID:
+        return None, None
+    
+    # 検索ワードを少し綺麗にする（長すぎるとヒットしないため）
+    clean_keyword = keyword.split(' / ')[0][:30] 
 
-# 2026年現在のLIPSの構造に合わせて取得
-items = soup.find_all("div", class_="ProductCard_container__Y6p4_")
+    url = "https://app.rakuten.co.jp/services/api/IchibaItem/Search/20170706"
+    params = {
+        "applicationId": RAKUTEN_APP_ID,
+        "affiliateId": RAKUTEN_AFF_ID,
+        "keyword": clean_keyword,
+        "sort": "+itemPrice", # 価格の安い順
+        "hits": 1
+    }
+    
+    try:
+        res = requests.get(url, params=params).json()
+        if "Items" in res and res["Items"]:
+            item = res["Items"][0]["Item"]
+            return item["itemPrice"], item["affiliateUrl"]
+    except Exception as e:
+        print(f"楽天APIエラー: {e}")
+    return None, None
 
-buzz_keywords = ["限定", "バズ", "話題", "予約", "完売", "新作", "韓国", "日本"]
-
-print(f"--- LIPSから『話題のコスメ』を捜索中 ---")
-
-found_count = 0
-with open("cosme_data.csv", "a", encoding="utf-8-sig", newline="") as f:
-    writer = csv.writer(f)
+def main():
+    print("--- LIPSから『最新トレンド』を分析中 ---")
+    # LIPSの「新作」や「トレンド」が並ぶページを狙います
+    url = "https://lipscosme.com/product_categories/1"
+    res = requests.get(url)
+    soup = BeautifulSoup(res.text, "html.parser")
+    
+    found_count = 0
+    # 商品カードを抽出
+    items = soup.find_all("div", class_="style_productCard__N_7_L")
     
     for item in items:
-        name_tag = item.find("p", class_="ProductCard_name__pB86m")
-        brand_tag = item.find("p", class_="ProductCard_brand__kRz_4")
+        title_tag = item.find("div", class_="style_productName__m6m_e")
+        if not title_tag: continue
         
-        name = name_tag.get_text(strip=True) if name_tag else "不明"
-        brand = brand_tag.get_text(strip=True) if brand_tag else "不明"
+        title = title_tag.get_text().strip()
         
-        link_tag = item.find("a")
-        href = "https://lipscosme.com" + link_tag.get("href") if link_tag else "URLなし"
-
-        is_buzz = any(word in name or word in brand for word in buzz_keywords)
-        
-        if is_buzz:
+        # 「限定」または「新作」が含まれる場合のみ処理（無駄を省くコスパ戦略）
+        if "限定" in title or "新作" in title:
             found_count += 1
-            now = datetime.now().strftime('%Y/%m/%d %H:%M')
-            writer.writerow([now, brand, name, href])
+            print(f"ターゲット発見: {title}")
             
-            msg = f"✨ **【コスメ新作/話題】** ✨\n**ブランド:** {brand}\n**アイテム:** {name}\n🔗 {href}"
+            # 楽天で最安値を検索
+            price, aff_url = get_rakuten_info(title)
+            
+            if price:
+                # 【稼げる通知】楽天に商品があった場合
+                msg = f"✨ **【新作/限定コスメ速報】** ✨\n"
+                msg += f"**{title}**\n\n"
+                msg += f"💰 **楽天最安値: {price}円**\n"
+                msg += f"🔗 [楽天で詳細・価格をチェック]({aff_url})\n"
+                msg += "※PR 売り切れる前に確保推奨！"
+            else:
+                # 【通常通知】楽天にまだない場合
+                msg = f"✨ **【新作コスメ発見】** ✨\n"
+                msg += f"**{title}**\n\n"
+                msg += "※楽天ではまだ取り扱いがないようです。店頭でチェック！"
+            
             send_discord(msg)
-            print(f"【発見】 {brand} / {name}")
 
-if found_count == 0:
-    send_discord("🔍 本日は『バズりそうな新作』は見当たりませんでした。また明日チェックします！")
-    print("今日は特に『バズりそう』な新作は見当たりませんでした。")
-else:
-       print(f"\n合計 {found_count} 件の情報を送信しました。")
+    if found_count == 0:
+        send_discord("🔍 本日は『バズりそうな新作』は見当たりませんでした。また明日22時にチェックします！")
+
+if __name__ == "__main__":
+    main()
